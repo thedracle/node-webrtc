@@ -122,6 +122,11 @@
   }
 
   function update_clang() {
+    var isWin = /^win/.test(process.platform);
+    if (isWin) {
+      return generate_build_scripts();
+    }
+
     var CLANG_SCRIPT_DIR = LIB_WEBRTC_DIR + '/chromium/src/tools/clang/scripts';
     console.log(': Updating clang ... ');
     spawn_log('bash',
