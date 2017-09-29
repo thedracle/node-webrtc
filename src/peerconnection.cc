@@ -19,7 +19,15 @@
 #include "src/set-remote-description-observer.h"
 #include "src/stats-observer.h"
 
+using node_webrtc::DataChannelEvent;
 using node_webrtc::Event;
+using node_webrtc::ErrorEvent;
+using node_webrtc::IceConnectionStateChangeEvent;
+using node_webrtc::IceEvent;
+using node_webrtc::IceGatheringStateChangeEvent;
+using node_webrtc::GetStatsEvent;
+using node_webrtc::SdpEvent;
+using node_webrtc::SignalingStateChangeEvent;
 using node_webrtc::PeerConnection;
 using v8::External;
 using v8::Function;

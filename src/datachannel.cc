@@ -11,6 +11,7 @@
 
 using node_webrtc::DataChannel;
 using node_webrtc::DataChannelObserver;
+using node_webrtc::DataChannelStateChangeEvent;
 using node_webrtc::ErrorEvent;
 using node_webrtc::Event;
 using node_webrtc::MessageEvent;
