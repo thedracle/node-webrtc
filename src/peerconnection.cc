@@ -40,6 +40,9 @@ Nan::Persistent<Function> PeerConnection::constructor;
 rtc::Thread* PeerConnection::_signalingThread;
 rtc::Thread* PeerConnection::_workerThread;
 
+#include <iostream>;
+using namespace std;
+
 //
 // PeerConnection
 //
@@ -183,6 +186,18 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
       argv[0] = dc;
       Nan::MakeCallback(pc, callback, 1, argv);
     }
+    else if(PeerConnection::NOTIFY_ADD_STREAM & evt.type) {
+      Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onaddstream").ToLocalChecked()));
+      if(callback->IsFunction()) {
+        webrtc::MediaStreamInterface* interface = static_cast<webrtc::MediaStreamInterface*>(evt.data);
+        Local<Value> cargv[1];
+        cargv[0] = Nan::New<External>(static_cast<void*>(interface));
+        Local<Value> ms = Nan::New(MediaStream::constructor)->NewInstance(1, cargv);
+        Local<Value> argv[1];
+        argv[0] = ms;
+        Nan::MakeCallback(pc, callback, 1, argv);
+      }
+    }
   }
 
   if (do_shutdown) {
@@ -235,11 +250,13 @@ void PeerConnection::OnDataChannel(webrtc::DataChannelInterface* jingle_data_cha
 
 void PeerConnection::OnAddStream(webrtc::MediaStreamInterface* stream) {
   TRACE_CALL;
+  QueueEvent(PeerConnection::NOTIFY_ADD_STREAM, static_cast<void*>(stream));
   TRACE_END;
 }
 
 void PeerConnection::OnRemoveStream(webrtc::MediaStreamInterface* stream) {
   TRACE_CALL;
+  QueueEvent(PeerConnection::NOTIFY_REMOVE_STREAM, static_cast<void*>(stream));
   TRACE_END;
 }
 
