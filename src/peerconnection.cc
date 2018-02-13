@@ -21,6 +21,7 @@
 #include "set-local-description-observer.h"
 #include "set-remote-description-observer.h"
 #include "stats-observer.h"
+#include "videosink.h"
 
 using node_webrtc::PeerConnection;
 using v8::External;
@@ -119,12 +120,14 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
       Local<Value> argv[1];
       argv[0] = Nan::Error(data->msg.c_str());
       Nan::MakeCallback(pc, callback, 1, argv);
+      delete data;
     } else if (PeerConnection::SDP_EVENT & evt.type) {
       PeerConnection::SdpEvent* data = static_cast<PeerConnection::SdpEvent*>(evt.data);
       Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onsuccess").ToLocalChecked()));
       Local<Value> argv[1];
       argv[0] = Nan::New(data->desc.c_str()).ToLocalChecked();
       Nan::MakeCallback(pc, callback, 1, argv);
+      delete data;
     } else if (PeerConnection::GET_STATS_SUCCESS & evt.type) {
       PeerConnection::GetStatsEvent* data = static_cast<PeerConnection::GetStatsEvent*>(evt.data);
       Nan::Callback *callback = data->callback;
@@ -133,6 +136,7 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
       Local<Value> argv[1];
       argv[0] = Nan::New(RTCStatsResponse::constructor)->NewInstance(1, cargv);
       callback->Call(1, argv);
+      delete data;
     } else if (PeerConnection::VOID_EVENT & evt.type) {
       Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onsuccess").ToLocalChecked()));
       Local<Value> argv[1];
@@ -148,6 +152,7 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
       if (webrtc::PeerConnectionInterface::kClosed == data->state) {
         do_shutdown = true;
       }
+      delete data;
     } else if (PeerConnection::ICE_CONNECTION_STATE_CHANGE & evt.type) {
       PeerConnection::StateEvent* data = static_cast<PeerConnection::StateEvent*>(evt.data);
       Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("oniceconnectionstatechange").ToLocalChecked()));
@@ -156,6 +161,7 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
         argv[0] = Nan::New<Uint32>(data->state);
         Nan::MakeCallback(pc, callback, 1, argv);
       }
+      delete data;
     } else if (PeerConnection::ICE_GATHERING_STATE_CHANGE & evt.type) {
       PeerConnection::StateEvent* data = static_cast<PeerConnection::StateEvent*>(evt.data);
       Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onicegatheringstatechange").ToLocalChecked()));
@@ -164,6 +170,7 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
         argv[0] = Nan::New<Uint32>(data->state);
         Nan::MakeCallback(pc, callback, 1, argv);
       }
+      delete data;
     } else if (PeerConnection::ICE_CANDIDATE & evt.type) {
       PeerConnection::IceEvent* data = static_cast<PeerConnection::IceEvent*>(evt.data);
       Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onicecandidate").ToLocalChecked()));
@@ -174,6 +181,7 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
         argv[2] = Nan::New<Integer>(data->sdpMLineIndex);
         Nan::MakeCallback(pc, callback, 3, argv);
       }
+      delete data;
     } else if (PeerConnection::NOTIFY_DATA_CHANNEL & evt.type) {
       PeerConnection::DataChannelEvent* data = static_cast<PeerConnection::DataChannelEvent*>(evt.data);
       DataChannelObserver* observer = data->observer;
@@ -185,6 +193,7 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
       Local<Value> argv[1];
       argv[0] = dc;
       Nan::MakeCallback(pc, callback, 1, argv);
+      delete data;
     }
     else if(PeerConnection::NOTIFY_ADD_STREAM & evt.type) {
       Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onaddstream").ToLocalChecked()));
@@ -198,6 +207,28 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
         Nan::MakeCallback(pc, callback, 1, argv);
       }
     }
+    else if(PeerConnection::NOTIFY_ON_FRAME & evt.type) {
+      VideoFrameEvent* event = static_cast<VideoFrameEvent*>(evt.data);
+
+      Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onvideoframe").ToLocalChecked()));
+      if(callback->IsFunction()) {
+        Local<Value> cargv[6];
+        Local<Value> label = Nan::New(event->label.c_str()).ToLocalChecked();
+        cargv[0] = label;
+        cargv[1] = Nan::New<Uint32>(event->width);
+        cargv[2] = Nan::New<Uint32>(event->height);
+        v8::Isolate* isolate = v8::Isolate::GetCurrent();
+        cargv[3] = Nan::New<v8::ArrayBuffer>(v8::ArrayBuffer::New(isolate, (void*)event->buffer->DataY(),
+                                                                  event->buffer->width() * event->buffer->height()));
+        cargv[4] = Nan::New<v8::ArrayBuffer>(v8::ArrayBuffer::New(isolate, (void*)event->buffer->DataU(),
+                                                                  (event->buffer->width() * event->buffer->height()) / 4));
+        cargv[5] = Nan::New<v8::ArrayBuffer>(v8::ArrayBuffer::New(isolate, (void*)event->buffer->DataV(),
+                                                                  (event->buffer->width() * event->buffer->height()) / 4));
+
+        Nan::MakeCallback(pc, callback, 6, cargv);
+      }
+      delete event;
+    }
   }
 
   if (do_shutdown) {
@@ -206,6 +237,38 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
 
   TRACE_END;
 }
+
+
+
+NAN_METHOD(PeerConnection::OnStreamVideoFrame) {
+  TRACE_CALL;
+  PeerConnection* self = Nan::ObjectWrap::Unwrap<PeerConnection>(info.This());
+
+  node_webrtc::MediaStream* ms = Nan::ObjectWrap::Unwrap<MediaStream>(info[0]->ToObject());
+
+  Nan::Callback onFrame(info[1].As<Function>());
+  Local<Value> cargv[1];
+  cargv[0] = Nan::New("TEST").ToLocalChecked();
+  onFrame.Call(1,cargv);
+  if(onFrame.GetFunction()->IsFunction()) {
+    auto mediaStreamInterface = ms->GetInterface();
+    auto videoTracks = mediaStreamInterface->GetVideoTracks();
+    string label = mediaStreamInterface->label();
+    for(auto videoTrack : videoTracks) {
+      videoTrack->AddOrUpdateSink(new rtc::RefCountedObject<VideoSink>([label, self](const webrtc::VideoFrame& frame, string inLabel) {
+        VideoFrameEvent* event = new VideoFrameEvent(label);
+        event->width = frame.width();
+        event->height = frame.height();
+        event->buffer = frame.video_frame_buffer();
+        self->QueueEvent(PeerConnection::NOTIFY_ON_FRAME, event);
+      }, label), rtc::VideoSinkWants());
+    }
+  }
+  cout << "DONE ON STREAM VIDEO FRAME" << endl;
+
+  TRACE_END;
+}
+
 
 void PeerConnection::OnError() {
   TRACE_CALL;
@@ -709,6 +772,7 @@ void PeerConnection::Init(rtc::Thread* signalingThread, rtc::Thread* workerThrea
   Nan::SetPrototypeMethod(tpl, "updateIce", UpdateIce);
   Nan::SetPrototypeMethod(tpl, "addIceCandidate", AddIceCandidate);
   Nan::SetPrototypeMethod(tpl, "createDataChannel", CreateDataChannel);
+  Nan::SetPrototypeMethod(tpl, "onStreamVideoFrame", OnStreamVideoFrame);
   Nan::SetPrototypeMethod(tpl, "close", Close);
 
   Nan::SetAccessor(tpl->InstanceTemplate(), Nan::New("localDescription").ToLocalChecked(), GetLocalDescription, ReadOnly);

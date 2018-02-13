@@ -66,6 +66,16 @@ class PeerConnection
     std::string candidate;
   };
 
+  struct VideoFrameEvent {
+    explicit VideoFrameEvent(std::string label)
+        : label(label) {}
+    rtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer;
+    int width;
+    int height;
+
+    std::string label;
+  };
+
   struct StateEvent {
     explicit StateEvent(uint32_t state)
     : state(state) {}
@@ -109,6 +119,7 @@ class PeerConnection
     NOTIFY_ADD_STREAM = 0x1 << 17,  // 131072
     NOTIFY_REMOVE_STREAM = 0x1 << 18,  // 262144
     GET_STATS_SUCCESS = 0x1 << 19,  // 524288
+    NOTIFY_ON_FRAME = 0x1 << 20,
 
     ERROR_EVENT = CREATE_OFFER_ERROR | CREATE_ANSWER_ERROR |
                   SET_LOCAL_DESCRIPTION_ERROR | SET_REMOTE_DESCRIPTION_ERROR |
@@ -161,6 +172,7 @@ class PeerConnection
   static NAN_METHOD(AddStream);
   static NAN_METHOD(RemoveStream);
   */
+  static NAN_METHOD(OnStreamVideoFrame);
   static NAN_METHOD(AddStream);
   static NAN_METHOD(GetStats);
   static NAN_METHOD(Close);
