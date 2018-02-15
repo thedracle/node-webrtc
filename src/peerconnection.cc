@@ -22,6 +22,7 @@
 #include "set-remote-description-observer.h"
 #include "stats-observer.h"
 #include "videosink.h"
+#include "vp8decoderproxy.h"
 
 using node_webrtc::PeerConnection;
 using v8::External;
@@ -41,7 +42,7 @@ Nan::Persistent<Function> PeerConnection::constructor;
 rtc::Thread* PeerConnection::_signalingThread;
 rtc::Thread* PeerConnection::_workerThread;
 
-#include <iostream>;
+#include <iostream>
 using namespace std;
 
 //
@@ -60,12 +61,10 @@ PeerConnection::PeerConnection(webrtc::PeerConnectionInterface::IceServers iceSe
 
   webrtc::FakeConstraints constraints;
   constraints.AddOptional(webrtc::MediaConstraintsInterface::kEnableDtlsSrtp, webrtc::MediaConstraintsInterface::kValueTrue);
-  // FIXME: crashes without these constraints, why?
-  //constraints.AddMandatory(webrtc::MediaConstraintsInterface::kOfferToReceiveAudio, webrtc::MediaConstraintsInterface::kValueFalse);
-  //constraints.AddMandatory(webrtc::MediaConstraintsInterface::kOfferToReceiveVideo, webrtc::MediaConstraintsInterface::kValueFalse);
 
+  _decoderFactory = new NodeDecoderFactory();
   _audioDeviceModule = new webrtc::FakeAudioDeviceModule();
-  _jinglePeerConnectionFactory = webrtc::CreatePeerConnectionFactory(_workerThread, _signalingThread, _audioDeviceModule, nullptr, nullptr);
+  _jinglePeerConnectionFactory = webrtc::CreatePeerConnectionFactory(_workerThread, _signalingThread, _audioDeviceModule, nullptr, _decoderFactory);
   _jinglePeerConnection = _jinglePeerConnectionFactory->CreatePeerConnection(configuration, &constraints, nullptr, nullptr, this);
 
   uv_mutex_init(&lock);
@@ -78,6 +77,7 @@ PeerConnection::~PeerConnection() {
   TRACE_CALL;
   _jinglePeerConnection = nullptr;
   _jinglePeerConnectionFactory = nullptr;
+  delete _decoderFactory;
   TRACE_END;
 }
 
@@ -229,6 +229,22 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
       }
       delete event;
     }
+    else if(PeerConnection::NOTIFY_ON_ENCODED_FRAME & evt.type) {
+      EncodedVideoFrameEvent* event = static_cast<EncodedVideoFrameEvent*>(evt.data);
+      Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onencodedvideoframe").ToLocalChecked()));
+      if(callback->IsFunction()) {
+        Local<Value> cargv[6];
+        Local<Value> label = Nan::New(event->label.c_str()).ToLocalChecked();
+        cargv[0] = label;
+        cargv[1] = Nan::New<Uint32>(event->width);
+        cargv[2] = Nan::New<Uint32>(event->height);
+        v8::Isolate* isolate = v8::Isolate::GetCurrent();
+        cargv[3] = Nan::New<v8::ArrayBuffer>(v8::ArrayBuffer::New(isolate, (void*)&event->buffer[0],
+                                                                  event->buffer.size()));
+        Nan::MakeCallback(pc, callback, 6, cargv);
+      }
+      delete event;
+    }
   }
 
   if (do_shutdown) {
@@ -246,28 +262,50 @@ NAN_METHOD(PeerConnection::OnStreamVideoFrame) {
 
   node_webrtc::MediaStream* ms = Nan::ObjectWrap::Unwrap<MediaStream>(info[0]->ToObject());
 
+  auto mediaStreamInterface = ms->GetInterface();
+  auto videoTracks = mediaStreamInterface->GetVideoTracks();
+  string label = mediaStreamInterface->label();
+  for(auto videoTrack : videoTracks) {
+    videoTrack->AddOrUpdateSink(new rtc::RefCountedObject<VideoSink>([label, self](const webrtc::VideoFrame& frame, string inLabel) {
+      VideoFrameEvent* event = new VideoFrameEvent(label);
+      event->width = frame.width();
+      event->height = frame.height();
+      event->buffer = frame.video_frame_buffer();
+      self->QueueEvent(PeerConnection::NOTIFY_ON_FRAME, event);
+    }, label), rtc::VideoSinkWants());
+  }
+
+  TRACE_END;
+}
+
+NAN_METHOD(PeerConnection::OnStreamEncodedVideoFrame) {
+  TRACE_CALL;
+  PeerConnection* self = Nan::ObjectWrap::Unwrap<PeerConnection>(info.This());
+
+  node_webrtc::MediaStream* ms = Nan::ObjectWrap::Unwrap<MediaStream>(info[0]->ToObject());
+
   Nan::Callback onFrame(info[1].As<Function>());
-  Local<Value> cargv[1];
-  cargv[0] = Nan::New("TEST").ToLocalChecked();
-  onFrame.Call(1,cargv);
-  if(onFrame.GetFunction()->IsFunction()) {
-    auto mediaStreamInterface = ms->GetInterface();
-    auto videoTracks = mediaStreamInterface->GetVideoTracks();
-    string label = mediaStreamInterface->label();
-    for(auto videoTrack : videoTracks) {
-      videoTrack->AddOrUpdateSink(new rtc::RefCountedObject<VideoSink>([label, self](const webrtc::VideoFrame& frame, string inLabel) {
-        VideoFrameEvent* event = new VideoFrameEvent(label);
-        event->width = frame.width();
-        event->height = frame.height();
-        event->buffer = frame.video_frame_buffer();
-        self->QueueEvent(PeerConnection::NOTIFY_ON_FRAME, event);
-      }, label), rtc::VideoSinkWants());
-    }
+  auto mediaStreamInterface = ms->GetInterface();
+  auto videoTracks = mediaStreamInterface->GetVideoTracks();
+  string label = mediaStreamInterface->label();
+  for(auto videoTrack : videoTracks) {
+    VP8DecoderProxy::RegisterProxyCallback(videoTrack->id(), [label, self](const webrtc::EncodedImage& frame, string inLabel) {
+      EncodedVideoFrameEvent* event = new EncodedVideoFrameEvent(inLabel);
+
+      event->width = frame._encodedWidth;
+      event->height = frame._encodedHeight;
+
+      event->buffer.insert(event->buffer.begin(), frame._buffer, frame._buffer + frame._length);
+      self->QueueEvent(PeerConnection::NOTIFY_ON_ENCODED_FRAME, event);
+    });
+    videoTrack->AddOrUpdateSink(new rtc::RefCountedObject<VideoSink>([label, self](const webrtc::VideoFrame& frame, string inLabel) {
+    }, label), rtc::VideoSinkWants());
   }
   cout << "DONE ON STREAM VIDEO FRAME" << endl;
 
   TRACE_END;
 }
+
 
 
 void PeerConnection::OnError() {
@@ -773,6 +811,7 @@ void PeerConnection::Init(rtc::Thread* signalingThread, rtc::Thread* workerThrea
   Nan::SetPrototypeMethod(tpl, "addIceCandidate", AddIceCandidate);
   Nan::SetPrototypeMethod(tpl, "createDataChannel", CreateDataChannel);
   Nan::SetPrototypeMethod(tpl, "onStreamVideoFrame", OnStreamVideoFrame);
+  Nan::SetPrototypeMethod(tpl, "onEncodedStreamVideoFrame", OnStreamEncodedVideoFrame);
   Nan::SetPrototypeMethod(tpl, "close", Close);
 
   Nan::SetAccessor(tpl->InstanceTemplate(), Nan::New("localDescription").ToLocalChecked(), GetLocalDescription, ReadOnly);
