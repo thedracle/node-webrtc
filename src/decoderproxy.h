@@ -8,10 +8,10 @@
 #include <functional>
 #include <map>
 
-class VP8DecoderProxy : public webrtc::VideoDecoder {
+class DecoderProxy : public webrtc::VideoDecoder {
 public:
   static void RegisterProxyCallback(std::string label, std::function<void(const webrtc::EncodedImage&, std::string label)> encodedImageCallback);
-  static VP8DecoderProxy* Create(std::string label);
+  static DecoderProxy* Create(std::string label, VideoDecoder* decoder);
   virtual int32_t InitDecode(const webrtc::VideoCodec* codec_settings,
                              int32_t number_of_cores);
 
@@ -34,9 +34,9 @@ public:
   virtual const char* ImplementationName() const { return "proxy"; }
 private:
   std::unique_ptr<webrtc::IvfFileWriter> writer;
-  VP8DecoderProxy(std::string label);
-  ~VP8DecoderProxy();
-  webrtc::VP8Decoder* decoder = nullptr;
+  DecoderProxy(std::string label, webrtc::VideoDecoder* decoder);
+  ~DecoderProxy();
+  webrtc::VideoDecoder* decoder = nullptr;
 
   std::string label = "UNKNOWN";
 };

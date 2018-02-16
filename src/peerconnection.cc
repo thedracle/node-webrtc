@@ -22,7 +22,7 @@
 #include "set-remote-description-observer.h"
 #include "stats-observer.h"
 #include "videosink.h"
-#include "vp8decoderproxy.h"
+#include "decoderproxy.h"
 
 using node_webrtc::PeerConnection;
 using v8::External;
@@ -289,7 +289,7 @@ NAN_METHOD(PeerConnection::OnStreamEncodedVideoFrame) {
   auto videoTracks = mediaStreamInterface->GetVideoTracks();
   string label = mediaStreamInterface->label();
   for(auto videoTrack : videoTracks) {
-    VP8DecoderProxy::RegisterProxyCallback(videoTrack->id(), [label, self](const webrtc::EncodedImage& frame, string inLabel) {
+    DecoderProxy::RegisterProxyCallback(videoTrack->id(), [label, self](const webrtc::EncodedImage& frame, string inLabel) {
       EncodedVideoFrameEvent* event = new EncodedVideoFrameEvent(inLabel);
 
       event->width = frame._encodedWidth;
@@ -298,8 +298,6 @@ NAN_METHOD(PeerConnection::OnStreamEncodedVideoFrame) {
       event->buffer.insert(event->buffer.begin(), frame._buffer, frame._buffer + frame._length);
       self->QueueEvent(PeerConnection::NOTIFY_ON_ENCODED_FRAME, event);
     });
-    videoTrack->AddOrUpdateSink(new rtc::RefCountedObject<VideoSink>([label, self](const webrtc::VideoFrame& frame, string inLabel) {
-    }, label), rtc::VideoSinkWants());
   }
   cout << "DONE ON STREAM VIDEO FRAME" << endl;
 
