@@ -635,6 +635,7 @@ NAN_METHOD(PeerConnection::AddStream) {
   PeerConnection* self = Nan::ObjectWrap::Unwrap<PeerConnection>(info.This());
   node_webrtc::MediaStream* ms = Nan::ObjectWrap::Unwrap<MediaStream>(info[0]->ToObject());
   self->_jinglePeerConnection->AddStream(ms->GetInterface());
+  self->QueueEvent(PeerConnection::ADD_STREAM_SUCCESS, static_cast<void*>(nullptr));
   TRACE_END;
   info.GetReturnValue().Set(Nan::Undefined());
 }
