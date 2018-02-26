@@ -241,9 +241,15 @@ void PeerConnection::Run(uv_async_t* handle, int status) {
         v8::Isolate* isolate = v8::Isolate::GetCurrent();
         cargv[3] = Nan::New<v8::ArrayBuffer>(v8::ArrayBuffer::New(isolate, (void*)&event->buffer[0],
                                                                   event->buffer.size()));
-        Nan::MakeCallback(pc, callback, 6, cargv);
+        Nan::MakeCallback(pc, callback, 4, cargv);
       }
       delete event;
+    }
+    else if(PeerConnection::NEGOTIATION_NEEDED & evt.type) {
+      Local<Function> callback = Local<Function>::Cast(pc->Get(Nan::New("onnegotiationneeded").ToLocalChecked()));
+      if(callback->IsFunction()) {
+        Nan::MakeCallback(pc, callback, 0, nullptr);
+      }
     }
   }
 
@@ -361,6 +367,7 @@ void PeerConnection::OnRemoveStream(webrtc::MediaStreamInterface* stream) {
 
 void PeerConnection::OnRenegotiationNeeded() {
   TRACE_CALL;
+  QueueEvent(PeerConnection::NEGOTIATION_NEEDED, nullptr);
   TRACE_END;
 }
 
