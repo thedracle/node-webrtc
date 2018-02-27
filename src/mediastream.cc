@@ -133,6 +133,41 @@ void MediaStream::OnChanged()
   TRACE_END;
 }
 
+NAN_METHOD(MediaStream::GetVideoTracks) {
+  TRACE_CALL;
+  MediaStream* self = ObjectWrap::Unwrap<MediaStream>( info.Holder() );
+
+  auto videoTracks = self->GetInterface()->GetVideoTracks();
+  auto videoTracksJSArray = Nan::New<v8::Array>(videoTracks.size());
+  int i = 0;
+  for(auto track : videoTracks) {
+    auto jsVideoTrack = Nan::New<v8::Object>();
+    Nan::Set(jsVideoTrack, Nan::New<v8::String>("id").ToLocalChecked(),
+             Nan::New<v8::String>(track->id()).ToLocalChecked());
+
+    Nan::Set(jsVideoTrack, Nan::New<v8::String>("kind").ToLocalChecked(),
+             Nan::New<v8::String>(track->kind()).ToLocalChecked());
+
+    Nan::Set(jsVideoTrack, Nan::New<v8::String>("label").ToLocalChecked(),
+             Nan::New<v8::String>("").ToLocalChecked());
+
+    Nan::Set(jsVideoTrack, Nan::New<v8::String>("muted").ToLocalChecked(),
+             Nan::New<v8::Boolean>(track->GetSource()->state()
+                                   == track->GetSource()->kMuted));
+
+    // ToDO: Determine if track is read only.
+    Nan::Set(jsVideoTrack, Nan::New<v8::String>("readonly").ToLocalChecked(),
+             Nan::New<v8::Boolean>(true));
+
+    Nan::Set(jsVideoTrack, Nan::New<v8::String>("remote").ToLocalChecked(),
+             Nan::New<v8::Boolean>(track->GetSource()->remote()));
+
+    Nan::Set(videoTracksJSArray, Nan::New<Number>(i++), jsVideoTrack);
+  }
+  TRACE_END;
+  info.GetReturnValue().Set(videoTracksJSArray);
+}
+
 NAN_GETTER(MediaStream::GetId) {
   TRACE_CALL;
 
@@ -143,6 +178,37 @@ NAN_GETTER(MediaStream::GetId) {
   TRACE_END;
   info.GetReturnValue().Set(Nan::New(label.c_str()).ToLocalChecked());
 }
+
+NAN_GETTER(MediaStream::GetState) {
+  TRACE_CALL;
+  /*
+   * The active read-only property of the MediaStream interface returns a
+   * Boolean value which is true if the stream is currently active;
+   * otherwise, it returns false. A stream is considered active if
+   * at least one of its MediaStreamTracks is not in the MediaStreamTrack.ended state.
+   * Once every track has ended, the stream's active property becomes false.
+   */
+  bool active = false;
+  MediaStream* self = ObjectWrap::Unwrap<MediaStream>( info.Holder() );
+  auto tracks = self->GetInterface()->GetVideoTracks();
+  for(auto track : tracks) {
+    if(track->state() != track->kEnded) {
+      active = true;
+      break;
+    }
+  }
+  auto audioTracks = self->GetInterface()->GetAudioTracks();
+  for(auto track : audioTracks) {
+    if(track->state() != track->kEnded) {
+      active = true;
+      break;
+    }
+  }
+
+  TRACE_END;
+  info.GetReturnValue().Set(Nan::New<Number>(static_cast<uint32_t>(active)));
+}
+
 
 NAN_SETTER(MediaStream::ReadOnly) {
   INFO("MediaStream::ReadOnly");
@@ -158,6 +224,8 @@ void MediaStream::Init( Handle<Object> exports ) {
   tpl->InstanceTemplate()->SetInternalFieldCount(1);
 
   Nan::SetAccessor(tpl->InstanceTemplate(), Nan::New("id").ToLocalChecked(), GetId, ReadOnly);
+  Nan::SetAccessor(tpl->InstanceTemplate(), Nan::New("state").ToLocalChecked(), GetState, ReadOnly);
+  Nan::SetPrototypeMethod(tpl, "getVideoTracks", GetVideoTracks);
 
   constructor.Reset(tpl->GetFunction());
   exports->Set(Nan::New("MediaStream").ToLocalChecked(), tpl->GetFunction());

@@ -53,11 +53,15 @@ class MediaStream
     static Nan::Persistent<Function> constructor;
     static NAN_METHOD(New);
 
+    static NAN_METHOD(GetVideoTracks);
+
     static NAN_GETTER(GetId);
 
     static NAN_SETTER(ReadOnly);
 
-    void QueueEvent(MediaStream::AsyncEventType type, void* data);
+    static NAN_GETTER(GetState);
+
+  void QueueEvent(MediaStream::AsyncEventType type, void* data);
     webrtc::MediaStreamInterface* GetInterface();
   
   private:
